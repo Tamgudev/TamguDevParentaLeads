@@ -31,7 +31,7 @@ jobs:
         env:
           SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
         run: |
-          pip install pandas requests serpapi
+          pip install pandas requests serpapi beautifulsoup4
           python fetch_leads.py
 
       - name: Setup Node.js
