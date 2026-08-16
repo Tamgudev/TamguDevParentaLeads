@@ -1,25 +1,25 @@
 import pandas as pd
-import requests
+import datetime
 
-# DfE GIAS Dataset
-url_gias = "https://www.get-information-schools.service.gov.uk/Downloads/Extracts/edubasealldata.csv"
+# Official UK Department for Education (GIAS) Live Data URL
+url = "https://www.get-information-schools.service.gov.uk/Downloads/Extracts/edubasealldata.csv"
 
 try:
-    print("Fetching live DfE dataset for settings catering to ages <= 6...")
-    df = pd.read_csv(url_gias, encoding='latin1', low_memory=False)
+    print("Fetching live DfE educational dataset...")
+    df = pd.read_csv(url, encoding='latin1', low_memory=False)
 
-    # 1. Open settings only
+    # 1. Keep Open settings only
     if 'EstablishmentStatus (name)' in df.columns:
-        df = df[df['EstablishmentStatus (name)'] == 'Open']
+        df = df[df['EstablishmentStatus (name)'].astype(str).str.lower() == 'open']
 
-    # 2. Filter settings catering to children 6 years old and younger
+    # 2. Filter for settings catering to children 6 years old and under
     low_age = pd.to_numeric(df['StatutoryLowAge'], errors='coerce')
     high_age = pd.to_numeric(df['StatutoryHighAge'], errors='coerce')
+    
+    # StatutoryLowAge <= 6 OR StatutoryHighAge <= 6
+    age_mask = (low_age <= 6) | (high_age <= 6)
 
-    # Settings where lower age is 6 or under
-    age_mask = (low_age <= 6)
-
-    # Filter by early years / primary keywords
+    # Keywords matching Early Years, Nursery, Infant, and Primary
     type_str = df['TypeOfEstablishment (name)'].fillna('').astype(str)
     name_str = df['EstablishmentName'].fillna('').astype(str)
     phase_str = df['PhaseOfEducation (name)'].fillna('').astype(str)
@@ -30,29 +30,35 @@ try:
         phase_str.str.contains('Nursery|Primary', case=False)
     )
 
-    df = df[age_mask & keyword_mask]
+    df = df[age_mask | keyword_mask].copy()
 
-    # 3. Parse Open Date & filter for last 3 years
+    # 3. Parse Open Dates and Sort by Newest Openings
     if 'OpenDate' in df.columns:
         df['OpenDate_parsed'] = pd.to_datetime(df['OpenDate'], dayfirst=True, errors='coerce')
-        df = df.dropna(subset=['OpenDate_parsed'])
-        
-        three_years_ago = pd.Timestamp.now() - pd.Timedelta(days=365 * 3)
-        recent_df = df[df['OpenDate_parsed'] >= three_years_ago]
+        df = df.sort_values(by='OpenDate_parsed', ascending=False, na_position='last')
 
-        # If strict 3-year cutoff yields fewer than 10, take the newest available records
-        if len(recent_df) >= 10:
-            df = recent_df
-        else:
-            df = df.sort_values(by='OpenDate_parsed', ascending=False)
+        # Calculate how long it's been open
+        today = pd.Timestamp.now()
+        def calculate_age_open(row):
+            dt = row['OpenDate_parsed']
+            if pd.isna(dt):
+                return 'N/A'
+            diff_days = (today - dt).days
+            if diff_days < 365:
+                return f"{diff_days} days ago"
+            else:
+                years = round(diff_days / 365, 1)
+                return f"{years} years ago"
+                
+        df['Time Open'] = df.apply(calculate_age_open, axis=1)
 
-    # 4. Map and clean columns
+    # 4. Select and Map Columns
     col_map = {
         'EstablishmentName': 'Setting Name',
+        'Time Open': 'Time Open',
         'OpenDate': 'Open Date',
         'StatutoryLowAge': 'Min Age',
         'StatutoryHighAge': 'Max Age',
-        'Town (name)': 'Town',
         'Postcode': 'Postcode',
         'TelephoneNum': 'Telephone',
         'SchoolWebsite': 'Website',
@@ -62,14 +68,14 @@ try:
     available_cols = [c for c in col_map.keys() if c in df.columns]
     df = df[available_cols].rename(columns=col_map)
 
-    # Format telephone links
+    # Clean & Format Telephones
     if 'Telephone' in df.columns:
         df['Telephone'] = df['Telephone'].fillna('').astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
         df['Telephone'] = df['Telephone'].apply(
             lambda phone: f'<a href="tel:{phone}">{phone}</a>' if phone and phone.lower() != 'nan' and phone != '' else 'N/A'
         )
 
-    # Format website links
+    # Clean & Format Websites
     if 'Website' in df.columns:
         def format_website(web):
             web_str = str(web).strip()
@@ -79,31 +85,28 @@ try:
             return f'<a href="{url_target}" target="_blank" rel="noopener noreferrer">Visit Website</a>'
         df['Website'] = df['Website'].apply(format_website)
 
-    # Format DfE profile link
+    # Clean DfE Record Profile Link
     if 'URN' in df.columns:
-        df['DfE Record'] = df['URN'].apply(
+        df['DfE Profile'] = df['URN'].apply(
             lambda urn: f'<a href="https://www.get-information-schools.service.gov.uk/Establishments/Establishment/Details/{urn}" target="_blank" rel="noopener noreferrer">View Record</a>'
         )
         df = df.drop(columns=['URN'])
 
-    # Format dates
-    if 'Open Date' in df.columns:
-        df['Open Date'] = pd.to_datetime(df['Open Date'], dayfirst=True, errors='coerce').dt.strftime('%Y-%m-%d')
-
+    # Limit view to top 100 newest leads
     df = df.head(100)
     total_leads = len(df)
-    print(f"Successfully processed {total_leads} active settings for ages <= 6.")
+    print(f"Successfully processed {total_leads} active early years settings.")
 
 except Exception as e:
     print(f"Error processing dataset: {e}")
     total_leads = 0
-    df = pd.DataFrame(columns=['Setting Name', 'Open Date', 'Min Age', 'Max Age', 'Town', 'Postcode', 'Telephone', 'Website', 'DfE Record'])
+    df = pd.DataFrame(columns=['Setting Name', 'Time Open', 'Open Date', 'Min Age', 'Max Age', 'Postcode', 'Telephone', 'Website', 'DfE Profile'])
 
-# Generate HTML Table
+# Generate Dashboard HTML
 if not df.empty:
     html_table = df.to_html(index=False, escape=False)
 else:
-    html_table = "<p style='padding: 20px; font-size: 16px; color: #dc2626;'>No active settings catering to ages 6 and under were found.</p>"
+    html_table = "<p style='padding: 20px; font-size: 16px; color: #dc2626;'>No active settings were found matching the criteria.</p>"
 
 html_content = f"""
 <!DOCTYPE html>
@@ -111,7 +114,7 @@ html_content = f"""
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>UK Early Years & Infant Leads (Ages 0-6)</title>
+    <title>Active UK Early Years Leads (Ages 6 & Under)</title>
     <style>
         body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 30px; background-color: #f8fafc; color: #1e293b; }}
         .header {{ margin-bottom: 25px; }}
@@ -130,7 +133,7 @@ html_content = f"""
 <body>
     <div class="header">
         <h1>UK Early Years Outreach Leads</h1>
-        <p class="subtitle">Active Settings Catering to Ages 6 & Under (Opened in Last 3 Years) | Total Leads: <span class="badge">{total_leads}</span></p>
+        <p class="subtitle">Active Settings Catering to Ages 6 & Under | Total Leads: <span class="badge">{total_leads}</span></p>
     </div>
     <div class="table-container">
         {html_table}
