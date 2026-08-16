@@ -38,8 +38,14 @@ jobs:
           node-version: '20'
 
       - name: Password Protect HTML with StatiCrypt
+        env:
+          SITE_PASSWORD: ${{ secrets.SITE_PASSWORD }}
         run: |
-          npx staticrypt index.html -p "${{ secrets.SITE_PASSWORD }}" -o index.html
+          if [ -z "$SITE_PASSWORD" ]; then
+            echo "Error: SITE_PASSWORD secret is missing!"
+            exit 1
+          fi
+          npx staticrypt index.html -p "$SITE_PASSWORD" -o .
 
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
