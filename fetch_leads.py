@@ -37,33 +37,53 @@ def get_html_template(title, content, active_page):
     </html>
     """
 
+def calculate_age_from_year(year):
+    current_date = datetime(2026, 8, 16)
+    diff_months = (current_date.year - year) * 12 + (current_date.month - 8)
+    diff_months = max(0, diff_months)
+    return f"{diff_months} months open" if diff_months > 0 else "Opened recently"
+
 def extract_age_from_website(url):
     if not url or url == "N/A":
-        return "Established Active Setting"
+        return None
     try:
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         response = requests.get(url, headers=headers, timeout=6)
-        if response.status_code != 200:
-            return "Established Active Setting"
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        text = soup.get_text()
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            text = soup.get_text()
 
-        # Look for establishment/opening patterns on the website text
-        patterns = [
-            r'(?:established|est\.?|founded|opened|opening|since)\s+(?:in\s+)?(\b(?:20\d\d|19\d\d)\b)',
-            r'(\b(?:20\d\d|19\d\d)\b)\s+(?:saw the opening|was established|was founded)'
-        ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                year = int(match.group(1))
-                current_date = datetime(2026, 8, 16)
-                diff_months = (current_date.year - year) * 12 + (current_date.month - 8)
-                diff_months = max(0, diff_months)
-                return f"{diff_months} months open" if diff_months > 0 else "Opened recently"
+            patterns = [
+                r'(?:established|est\.?|founded|opened|opening|since)\s+(?:in\s+)?(\b(?:20\d\d|19\d\d)\b)',
+                r'(\b(?:20\d\d|19\d\d)\b)\s+(?:saw the opening|was established|was founded)'
+            ]
+            
+            for pattern in patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    return int(match.group(1))
+    except Exception:
+        pass
+    return None
 
+def fetch_registry_date(setting_name, api_key):
+    """Cross-references Companies House or Ofsted via Google Search to find incorporation/registration date."""
+    try:
+        params = {
+            "engine": "google",
+            "q": f'"{setting_name}" site:find-and-update.company-information.service.gov.uk OR site:gov.uk incorporation registration date',
+            "api_key": api_key
+        }
+        response = requests.get("https://serpapi.com/search.json", params=params, timeout=10)
+        results = response.json()
+        
+        snippets = [item.get("snippet", "") for item in results.get("organic_results", [])]
+        combined_text = " ".join(snippets)
+        
+        year_match = re.search(r'\b(?:19|20)\d{2}\b', combined_text)
+        if year_match:
+            year = int(year_match.group(0))
+            return calculate_age_from_year(year)
     except Exception:
         pass
     
@@ -133,8 +153,13 @@ def fetch_data():
                 website_raw = item.get("website")
                 website = f'<a href="{website_raw}" target="_blank">Visit Website</a>' if website_raw else "N/A"
                 
-                # Extract age directly from the nursery's website content
-                age_info = extract_age_from_website(website_raw)
+                # Step 1: Attempt extraction from website text
+                year = extract_age_from_website(website_raw)
+                if year:
+                    age_info = calculate_age_from_year(year)
+                else:
+                    # Step 2: Fallback to Companies House & Ofsted public registry search
+                    age_info = fetch_registry_date(name, api_key)
 
                 leads.append({
                     "Setting Name": name,
