@@ -8,7 +8,7 @@ try:
     df = pd.read_csv(url, encoding='latin1')
     # Filter and format real dataset columns here
 except Exception as e:
-    print(f"Could not load live CSV ({e}). Generating sample data with clickable links...")
+    print(f"Could not load live CSV ({e}). Generating sample data with phone numbers...")
     data = {
         'Setting Name': ['Sunshine Day Nursery', 'Little Stars Pre-school', 'Bright Minds Childcare'],
         'Registration Date': [
@@ -17,16 +17,21 @@ except Exception as e:
             (datetime.datetime.now() - datetime.timedelta(days=180)).strftime('%Y-%m-%d')
         ],
         'Postcode': ['SW1A 1AA', 'M1 1AE', 'B1 1BB'],
+        'Telephone': [
+            '<a href="tel:02079460123">020 7946 0123</a>',
+            '<a href="tel:01614960456">0161 496 0456</a>',
+            '<a href="tel:01214960789">0121 496 0789</a>'
+        ],
         'Status': ['Active', 'Active', 'Active'],
-        'Source Record': [
-            '<a href="https://reports.ofsted.gov.uk" target="_blank" rel="noopener noreferrer">View Ofsted Record</a>',
-            '<a href="https://reports.ofsted.gov.uk" target="_blank" rel="noopener noreferrer">View Ofsted Record</a>',
-            '<a href="https://reports.ofsted.gov.uk" target="_blank" rel="noopener noreferrer">View Ofsted Record</a>'
+        'Ofsted Record': [
+            '<a href="https://reports.ofsted.gov.uk" target="_blank" rel="noopener noreferrer">View Record</a>',
+            '<a href="https://reports.ofsted.gov.uk" target="_blank" rel="noopener noreferrer">View Record</a>',
+            '<a href="https://reports.ofsted.gov.uk" target="_blank" rel="noopener noreferrer">View Record</a>'
         ]
     }
     df = pd.DataFrame(data)
 
-# Generate HTML table allowing HTML formatting for links
+# Generate HTML table allowing HTML formatting for links & phone numbers
 html_table = df.to_html(index=False, escape=False)
 
 html_content = f"""
