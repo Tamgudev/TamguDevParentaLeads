@@ -209,6 +209,20 @@ if __name__ == "__main__":
             "Website": "N/A",
             "Age / Opening Info": "N/A"
         }])
+    else:
+        # Custom sorting: 1. "Opened recently", 2. Ascending numerical months, 3. "Established Active Setting"
+        def sort_age_info(val):
+            if val == "Opened recently":
+                return (0, 0)
+            elif "months open" in val:
+                match = re.search(r'(\d+)', val)
+                num = int(match.group(1)) if match else 0
+                return (1, num)
+            else:
+                return (2, 0)
+        
+        df_leads['sort_key'] = df_leads['Age / Opening Info'].apply(sort_age_info)
+        df_leads = df_leads.sort_values('sort_key').drop(columns=['sort_key'])
 
     with open("index.html", "w", encoding="utf-8") as f:
         html = get_html_template("UK Early Years Leads", df_leads.to_html(index=False, escape=False), "leads")
@@ -218,4 +232,4 @@ if __name__ == "__main__":
         html = get_html_template("Industry Resources", df_res.to_html(index=False, escape=False), "resources")
         f.write(html)
 
-    print("Successfully generated HTML pages.")
+    print("Successfully generated and sorted HTML pages.")
