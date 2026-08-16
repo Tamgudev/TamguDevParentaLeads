@@ -2,7 +2,7 @@ import os
 import re
 from datetime import datetime
 import pandas as pd
-import serpapi
+from serpapi import GoogleSearch
 
 def get_html_template(title, content, active_page):
     nav = f'''
@@ -73,33 +73,36 @@ def is_corporate_chain(name):
 def fetch_data():
     api_key = os.getenv("SERPAPI_KEY")
     if not api_key:
-        print("Error: SERPAPI_KEY not set.")
+        print("ERROR: SERPAPI_KEY environment variable is missing!")
         return pd.DataFrame(), pd.DataFrame()
 
-    client = serpapi.Client(api_key=api_key)
-
-    # Multi-regional London queries to pull a robust list of unique leads
     search_queries = [
+        "day nurseries London",
         "day nurseries North London",
-        "day nurseries South London",
-        "day nurseries East London",
-        "day nurseries West London",
-        "day nurseries Central London"
+        "day nurseries South London"
     ]
 
     seen_keys = set()
     leads = []
 
     for q in search_queries:
+        print(f"Executing search query: '{q}'...")
         try:
-            results = client.search({
+            params = {
                 "engine": "google_maps",
                 "q": q,
-                "num": 40,
+                "num": 30,
                 "hl": "en",
-                "gl": "uk"
-            })
-            for item in results.get("local_results", []):
+                "gl": "uk",
+                "api_key": api_key
+            }
+            search = GoogleSearch(params)
+            results = search.get_dict()
+            
+            local_results = results.get("local_results", [])
+            print(f"Found {len(local_results)} results for '{q}'")
+            
+            for item in local_results:
                 name = item.get("title", "N/A")
                 
                 if is_corporate_chain(name):
@@ -107,7 +110,6 @@ def fetch_data():
 
                 address = item.get("address", "N/A")
                 
-                # Strict de-duplication key based on normalized name and address
                 unique_key = (name.strip().lower(), address.strip().lower())
                 if unique_key in seen_keys:
                     continue
@@ -121,7 +123,7 @@ def fetch_data():
                 
                 extensions = item.get("extensions", [])
                 ext_text = " ".join(extensions) if isinstance(extensions, list) else str(extensions)
-                ext_text += " " + str(item.get("description", "")) + " " + str(item.get("snippet", ""))
+                ext_text += " " + str(item.get("description", ""))
                 
                 months = calculate_months_from_date(ext_text)
                 if months is not None:
@@ -137,17 +139,23 @@ def fetch_data():
                     "Age / Opening Info": age_info
                 })
         except Exception as e:
-            print(f"Error fetching query '{q}': {e}")
+            print(f"Error executing query '{q}': {e}")
 
-    # Fetch Resources (Google Search)
+    print(f"Total unique leads collected after filtering: {len(leads)}")
+
+    # Fetch Resources
     resources = []
     try:
-        res = client.search({
+        res_params = {
             "engine": "google",
             "q": "early years childcare registration guides UK",
             "num": 10,
-            "gl": "uk"
-        })
+            "gl": "uk",
+            "api_key": api_key
+        }
+        res_search = GoogleSearch(res_params)
+        res = res_search.get_dict()
+        
         for item in res.get("organic_results", []):
             resources.append({
                 "Title": item.get("title"),
@@ -163,8 +171,9 @@ if __name__ == "__main__":
     df_leads, df_res = fetch_data()
     
     if df_leads.empty:
+        print("WARNING: df_leads is empty! Falling back to placeholder message.")
         df_leads = pd.DataFrame([{
-            "Setting Name": "Awaiting Fresh Scan",
+            "Setting Name": "Awaiting Fresh Scan (Check GitHub Actions Log)",
             "Phone Number": "N/A",
             "Address": "N/A",
             "Website": "N/A",
@@ -179,4 +188,4 @@ if __name__ == "__main__":
         html = get_html_template("Industry Resources", df_res.to_html(index=False, escape=False), "resources")
         f.write(html)
 
-    print(f"Successfully generated index.html and resources.html with {len(df_leads)} leads!")
+    print("Successfully generated HTML pages.")
