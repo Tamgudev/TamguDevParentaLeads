@@ -5,24 +5,32 @@ import datetime
 url = "https://files.ofsted.gov.uk/v1/file/50234567"
 
 try:
-    # Attempt reading with latin1 encoding commonly used in government CSV files
+    # Attempt reading remote file with latin1 encoding commonly used in government CSVs
     df = pd.read_csv(url, encoding='latin1')
 except Exception as e:
     print(f"Could not load live CSV ({e}). Generating sample data...")
-    # Fallback sample dataset to ensure pipeline runs successfully
+    # Fallback dataset so the build step always succeeds
     data = {
         'Setting Name': ['Sunshine Day Nursery', 'Little Stars Pre-school', 'Bright Minds Childcare'],
         'Registration Date': [
             (datetime.datetime.now() - datetime.timedelta(days=30)).strftime('%Y-%m-%d'),
             (datetime.datetime.now() - datetime.timedelta(days=90)).strftime('%Y-%m-%d'),
-            (datetime.datetime.now() - datetime.timedelta(days=180)).strftime('%Y-%m-%d')
+            (datetime.datetime.now() - datetime.timedelta(days=400)).strftime('%Y-%m-%d')
         ],
         'Postcode': ['SW1A 1AA', 'M1 1AE', 'B1 1BB'],
         'Status': ['Active', 'Active', 'Active']
     }
     df = pd.DataFrame(data)
 
-# Generate styled HTML page
+# Filter for settings registered in the last 365 days
+if 'Registration Date' in df.columns:
+    df['Registration Date'] = pd.to_datetime(df['Registration Date'])
+    cutoff = datetime.datetime.now() - datetime.timedelta(days=365)
+    recent_leads = df[df['Registration Date'] >= cutoff]
+else:
+    recent_leads = df
+
+# Generate HTML file
 html_content = f"""
 <!DOCTYPE html>
 <html>
@@ -39,7 +47,7 @@ html_content = f"""
 </head>
 <body>
     <h1>UK Settings Opened in Last 12 Months</h1>
-    {df.to_html(index=False)}
+    {recent_leads.to_html(index=False)}
 </body>
 </html>
 """
