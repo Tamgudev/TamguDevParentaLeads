@@ -2,7 +2,8 @@ import os
 import re
 from datetime import datetime
 import pandas as pd
-import serpapi
+import requests
+from bs4 import BeautifulSoup
 
 def get_html_template(title, content, active_page):
     nav = f'''
@@ -36,27 +37,37 @@ def get_html_template(title, content, active_page):
     </html>
     """
 
-def calculate_months_from_date(date_text):
-    match_year = re.search(r'\b(20\d\d|19\d\d)\b', date_text)
-    if not match_year:
-        return None
-    
-    year = int(match_year.group(1))
-    months_map = {
-        'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
-        'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
-    }
-    month = 6 
-    for m_name, m_num in months_map.items():
-        if m_name in date_text.lower():
-            month = m_num
-            break
+def extract_age_from_website(url):
+    if not url or url == "N/A":
+        return "Established Active Setting"
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        response = requests.get(url, headers=headers, timeout=6)
+        if response.status_code != 200:
+            return "Established Active Setting"
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        text = soup.get_text()
 
-    current_date = datetime(2026, 8, 16)
-    target_date = datetime(year, month, 1)
+        # Look for establishment/opening patterns on the website text
+        patterns = [
+            r'(?:established|est\.?|founded|opened|opening|since)\s+(?:in\s+)?(\b(?:20\d\d|19\d\d)\b)',
+            r'(\b(?:20\d\d|19\d\d)\b)\s+(?:saw the opening|was established|was founded)'
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                year = int(match.group(1))
+                current_date = datetime(2026, 8, 16)
+                diff_months = (current_date.year - year) * 12 + (current_date.month - 8)
+                diff_months = max(0, diff_months)
+                return f"{diff_months} months open" if diff_months > 0 else "Opened recently"
+
+    except Exception:
+        pass
     
-    diff_months = (current_date.year - target_date.year) * 12 + (current_date.month - target_date.month)
-    return max(0, diff_months)
+    return "Established Active Setting"
 
 def is_corporate_chain(name):
     chains = [
@@ -76,13 +87,6 @@ def fetch_data():
         print("ERROR: SERPAPI_KEY environment variable is missing!")
         return pd.DataFrame(), pd.DataFrame()
 
-    print(f"API Key found. Initializing SerpApi Client...")
-    try:
-        client = serpapi.Client(api_key=api_key)
-    except Exception as e:
-        print(f"ERROR initializing serpapi.Client: {e}")
-        return pd.DataFrame(), pd.DataFrame()
-
     search_queries = [
         "day nurseries London",
         "day nurseries North London",
@@ -95,14 +99,18 @@ def fetch_data():
     for q in search_queries:
         print(f"Executing search query: '{q}'...")
         try:
-            results = client.search({
+            params = {
                 "engine": "google_maps",
                 "q": q,
-                "num": 30,
-                "hl": "en",
-                "gl": "uk"
-            })
+                "api_key": api_key
+            }
+            response = requests.get("https://serpapi.com/search.json", params=params, timeout=30)
+            results = response.json()
             
+            if "error" in results:
+                print(f"SerpApi error for '{q}': {results['error']}")
+                continue
+
             local_results = results.get("local_results", [])
             print(f"Found {len(local_results)} results for '{q}'")
             
@@ -125,15 +133,8 @@ def fetch_data():
                 website_raw = item.get("website")
                 website = f'<a href="{website_raw}" target="_blank">Visit Website</a>' if website_raw else "N/A"
                 
-                extensions = item.get("extensions", [])
-                ext_text = " ".join(extensions) if isinstance(extensions, list) else str(extensions)
-                ext_text += " " + str(item.get("description", ""))
-                
-                months = calculate_months_from_date(ext_text)
-                if months is not None:
-                    age_info = f"{months} months open" if months > 0 else "Opened recently"
-                else:
-                    age_info = "Established Active Setting"
+                # Extract age directly from the nursery's website content
+                age_info = extract_age_from_website(website_raw)
 
                 leads.append({
                     "Setting Name": name,
@@ -150,12 +151,16 @@ def fetch_data():
     # Fetch Resources
     resources = []
     try:
-        res = client.search({
+        res_params = {
             "engine": "google",
             "q": "early years childcare registration guides UK",
             "num": 10,
-            "gl": "uk"
-        })
+            "gl": "uk",
+            "api_key": api_key
+        }
+        res_response = requests.get("https://serpapi.com/search.json", params=res_params, timeout=30)
+        res = res_response.json()
+        
         for item in res.get("organic_results", []):
             resources.append({
                 "Title": item.get("title"),
