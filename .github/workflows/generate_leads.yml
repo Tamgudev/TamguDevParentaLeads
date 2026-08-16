@@ -1,3 +1,6 @@
+Replace your workflow file content with the updated configuration below to ensure `requests` and `beautifulsoup4` are installed:
+
+```yaml
 name: Generate & Update UK Early Years Leads
 
 on:
@@ -22,7 +25,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install pandas serpapi
+          pip install pandas requests beautifulsoup4
 
       - name: Run fetch script
         env:
@@ -36,3 +39,5 @@ jobs:
           git add index.html resources.html
           git commit -m "Auto-update UK Early Years leads index.html [skip ci]" || exit 0
           git push
+
+```
