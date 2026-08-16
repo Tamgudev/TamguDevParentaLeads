@@ -2,7 +2,7 @@ import os
 import re
 from datetime import datetime
 import pandas as pd
-from serpapi import GoogleSearch
+import serpapi
 
 def get_html_template(title, content, active_page):
     nav = f'''
@@ -76,6 +76,13 @@ def fetch_data():
         print("ERROR: SERPAPI_KEY environment variable is missing!")
         return pd.DataFrame(), pd.DataFrame()
 
+    print(f"API Key found. Initializing SerpApi Client...")
+    try:
+        client = serpapi.Client(api_key=api_key)
+    except Exception as e:
+        print(f"ERROR initializing serpapi.Client: {e}")
+        return pd.DataFrame(), pd.DataFrame()
+
     search_queries = [
         "day nurseries London",
         "day nurseries North London",
@@ -88,16 +95,13 @@ def fetch_data():
     for q in search_queries:
         print(f"Executing search query: '{q}'...")
         try:
-            params = {
+            results = client.search({
                 "engine": "google_maps",
                 "q": q,
                 "num": 30,
                 "hl": "en",
-                "gl": "uk",
-                "api_key": api_key
-            }
-            search = GoogleSearch(params)
-            results = search.get_dict()
+                "gl": "uk"
+            })
             
             local_results = results.get("local_results", [])
             print(f"Found {len(local_results)} results for '{q}'")
@@ -146,16 +150,12 @@ def fetch_data():
     # Fetch Resources
     resources = []
     try:
-        res_params = {
+        res = client.search({
             "engine": "google",
             "q": "early years childcare registration guides UK",
             "num": 10,
-            "gl": "uk",
-            "api_key": api_key
-        }
-        res_search = GoogleSearch(res_params)
-        res = res_search.get_dict()
-        
+            "gl": "uk"
+        })
         for item in res.get("organic_results", []):
             resources.append({
                 "Title": item.get("title"),
