@@ -37,105 +37,115 @@ def get_html_template(title, content, active_page):
     """
 
 def calculate_months_from_date(date_text):
-    # Search for year and optional month in the text
     match_year = re.search(r'\b(20\d\d|19\d\d)\b', date_text)
     if not match_year:
         return None
     
     year = int(match_year.group(1))
-    
-    # Try to detect month
     months_map = {
         'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
         'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
     }
-    month = 6  # Default to mid-year if month is not explicitly named
+    month = 6 
     for m_name, m_num in months_map.items():
         if m_name in date_text.lower():
             month = m_num
             break
 
-    current_date = datetime(2026, 8, 16) # Current date reference
+    current_date = datetime(2026, 8, 16)
     target_date = datetime(year, month, 1)
     
     diff_months = (current_date.year - target_date.year) * 12 + (current_date.month - target_date.month)
     return max(0, diff_months)
 
-def get_setting_age(client, name, address):
-    # 1. Check maps extensions first
-    # (Passed via item inspection if available)
-    
-    # 2. Fallback: Search government registries, website & news for opening date
-    try:
-        query = f'"{name}" nursery opening date OR Ofsted registration OR established'
-        res = client.search({"engine": "google", "q": query, "num": 3, "gl": "uk"})
-        
-        combined_text = ""
-        for item in res.get("organic_results", []):
-            combined_text += " " + item.get("title", "") + " " + item.get("snippet", "")
-            
-        months = calculate_months_from_date(combined_text)
-        if months is not None:
-            if months == 0:
-                return "Opened recently (< 1 month)"
-            return f"{months} months open"
-    except Exception:
-        pass
-        
-    return "Established (Exact date unindexed)"
+def is_corporate_chain(name):
+    chains = [
+        "bright horizons", "busy bees", "grandir", "family first", 
+        "monkey puzzle", "banana moon", "kids planet", "partou", 
+        "asquith", "kiddi caru", "toad hall", "fennies"
+    ]
+    name_lower = name.lower()
+    for chain in chains:
+        if chain in name_lower:
+            return True
+    return False
 
 def fetch_data():
     api_key = os.getenv("SERPAPI_KEY")
+    if not api_key:
+        print("Error: SERPAPI_KEY not set.")
+        return pd.DataFrame(), pd.DataFrame()
+
     client = serpapi.Client(api_key=api_key)
 
-    # 1. Fetch up to 50 Settings (Google Maps)
+    # Multi-regional London queries to pull a robust list of unique leads
+    search_queries = [
+        "day nurseries North London",
+        "day nurseries South London",
+        "day nurseries East London",
+        "day nurseries West London",
+        "day nurseries Central London"
+    ]
+
+    seen_keys = set()
     leads = []
-    try:
-        results = client.search({
-            "engine": "google_maps",
-            "q": "day nurseries London",
-            "num": 50,
-            "hl": "en",
-            "gl": "uk"
-        })
-        for item in results.get("local_results", []):
-            name = item.get("title", "N/A")
-            phone_raw = item.get("phone")
-            phone = f'<a href="tel:{phone_raw}">{phone_raw}</a>' if phone_raw else "N/A"
-            address = item.get("address", "N/A")
-            
-            website_raw = item.get("website")
-            website = f'<a href="{website_raw}" target="_blank">Visit Website</a>' if website_raw else "N/A"
-            
-            # Check map extension/description first
-            extensions = item.get("extensions", [])
-            ext_text = " ".join(extensions) if isinstance(extensions, list) else str(extensions)
-            ext_text += " " + str(item.get("description", ""))
-            
-            months = calculate_months_from_date(ext_text)
-            if months is not None:
-                age_info = f"{months} months open" if months > 0 else "Opened recently"
-            else:
-                # Fallback: check government/web sources
-                age_info = get_setting_age(client, name, address)
 
-            leads.append({
-                "Setting Name": name,
-                "Phone Number": phone,
-                "Address": address,
-                "Website": website,
-                "Age / Opening Info": age_info
+    for q in search_queries:
+        try:
+            results = client.search({
+                "engine": "google_maps",
+                "q": q,
+                "num": 40,
+                "hl": "en",
+                "gl": "uk"
             })
-    except Exception as e:
-        print(f"Error fetching leads: {e}")
+            for item in results.get("local_results", []):
+                name = item.get("title", "N/A")
+                
+                if is_corporate_chain(name):
+                    continue
 
-    # 2. Fetch Resources (Google Search)
+                address = item.get("address", "N/A")
+                
+                # Strict de-duplication key based on normalized name and address
+                unique_key = (name.strip().lower(), address.strip().lower())
+                if unique_key in seen_keys:
+                    continue
+                seen_keys.add(unique_key)
+
+                phone_raw = item.get("phone")
+                phone = f'<a href="tel:{phone_raw}">{phone_raw}</a>' if phone_raw else "N/A"
+                
+                website_raw = item.get("website")
+                website = f'<a href="{website_raw}" target="_blank">Visit Website</a>' if website_raw else "N/A"
+                
+                extensions = item.get("extensions", [])
+                ext_text = " ".join(extensions) if isinstance(extensions, list) else str(extensions)
+                ext_text += " " + str(item.get("description", "")) + " " + str(item.get("snippet", ""))
+                
+                months = calculate_months_from_date(ext_text)
+                if months is not None:
+                    age_info = f"{months} months open" if months > 0 else "Opened recently"
+                else:
+                    age_info = "Established Active Setting"
+
+                leads.append({
+                    "Setting Name": name,
+                    "Phone Number": phone,
+                    "Address": address,
+                    "Website": website,
+                    "Age / Opening Info": age_info
+                })
+        except Exception as e:
+            print(f"Error fetching query '{q}': {e}")
+
+    # Fetch Resources (Google Search)
     resources = []
     try:
         res = client.search({
             "engine": "google",
             "q": "early years childcare registration guides UK",
-            "num": 15,
+            "num": 10,
             "gl": "uk"
         })
         for item in res.get("organic_results", []):
@@ -161,14 +171,12 @@ if __name__ == "__main__":
             "Age / Opening Info": "N/A"
         }])
 
-    # Save Leads Page
     with open("index.html", "w", encoding="utf-8") as f:
         html = get_html_template("UK Early Years Leads", df_leads.to_html(index=False, escape=False), "leads")
         f.write(html)
         
-    # Save Resources Page
     with open("resources.html", "w", encoding="utf-8") as f:
         html = get_html_template("Industry Resources", df_res.to_html(index=False, escape=False), "resources")
         f.write(html)
 
-    print("Successfully generated index.html and resources.html with active government/web age lookups!")
+    print(f"Successfully generated index.html and resources.html with {len(df_leads)} leads!")
